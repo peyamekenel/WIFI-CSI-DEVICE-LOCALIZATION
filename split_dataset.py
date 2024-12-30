@@ -9,8 +9,12 @@ def load_preprocessed_features(feature_dir='csi_features'):
     X = []  # Features
     y = []  # Labels (distance, angle)
     
-    # Process each .mat file
-    for filename in sorted(os.listdir('.')):
+    # Process each .mat file in the data directory
+    data_dir = os.path.join(os.getcwd(), 'data')
+    if not os.path.exists(data_dir):
+        raise FileNotFoundError(f"Data directory not found at {data_dir}")
+        
+    for filename in sorted(os.listdir(data_dir)):
         if not filename.endswith('.mat'):
             continue
             
@@ -23,7 +27,8 @@ def load_preprocessed_features(feature_dir='csi_features'):
         print(f"Processing {filename} - Distance: {distance}m, Angle: {angle}°")
         
         # Load and preprocess data (using same functions from preprocess_csi.py)
-        with h5py.File(filename, 'r') as f:
+        file_path = os.path.join(data_dir, filename)
+        with h5py.File(file_path, 'r') as f:
             # Get total number of packets
             total_packets = f['csi_complex_data'].shape[0]
             # Use random sampling
