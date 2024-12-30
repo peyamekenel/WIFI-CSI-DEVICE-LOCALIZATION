@@ -32,10 +32,24 @@ def load_csi_data(filepath, max_packets=10000):
         return np.transpose(csi_data, (2, 1, 0))
 
 def extract_features(csi_data):
-    """Extract amplitude, phase, and statistical features from CSI data."""
+    """Extract amplitude, phase, and statistical features from CSI data with added noise."""
+    # Add complex Gaussian noise (5% of signal amplitude)
+    noise_level = 0.05 * np.mean(np.abs(csi_data))
+    complex_noise = (np.random.normal(0, noise_level, csi_data.shape) + 
+                    1j * np.random.normal(0, noise_level, csi_data.shape))
+    csi_data = csi_data + complex_noise
+    
+    # Add random phase rotation (up to 5 degrees)
+    phase_noise = np.random.uniform(0, 5 * np.pi/180, size=csi_data.shape)
+    csi_data = csi_data * np.exp(1j * phase_noise)
+    
     # Extract amplitude (in dB) and phase with safety checks
     epsilon = 1e-10  # Small constant to prevent log(0)
     amplitude = np.abs(csi_data)
+    # Add amplitude noise (2% of mean amplitude)
+    amplitude_noise = np.random.normal(0, 0.02 * np.mean(amplitude), amplitude.shape)
+    amplitude += amplitude_noise
+    
     # Clip small values to epsilon before log
     amplitude_clipped = np.maximum(amplitude, epsilon)
     amplitude_db = 20 * np.log10(amplitude_clipped)
