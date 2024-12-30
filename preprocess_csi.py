@@ -114,6 +114,43 @@ def plot_csi_features(features, filename):
     plt.savefig(f'csi_features_{filename.replace(".mat", ".png")}')
     plt.close()
 
+def save_features(features, filepath, output_dir):
+    """Save extracted features to a numpy file."""
+    # Get dimensions
+    n_antennas, n_subcarriers = features['amplitude_mean'].shape
+    n_samples = 10000  # Number of samples per file
+    
+    # Initialize feature array (n_samples, n_features)
+    n_features = (n_antennas * n_subcarriers * 2) + 5  # 90 amplitude + 90 phase + 5 stats
+    feature_array = np.zeros((n_samples, n_features))
+    
+    # Fill feature array
+    sample_idx = 0
+    for i in range(n_antennas):
+        for j in range(n_subcarriers):
+            # Amplitude features (first 90 features)
+            feature_idx = i * n_subcarriers + j
+            feature_array[:, feature_idx] = features['amplitude_mean'][i, j]
+            
+            # Phase features (next 90 features)
+            phase_idx = (n_antennas * n_subcarriers) + (i * n_subcarriers + j)
+            feature_array[:, phase_idx] = features['phase_mean'][i, j]
+    
+    # Add statistical features (last 5 features)
+    stat_start = n_antennas * n_subcarriers * 2
+    feature_array[:, stat_start] = features['amplitude_std'].mean(axis=(0,1))
+    feature_array[:, stat_start+1] = features['amplitude_var'].mean(axis=(0,1))
+    feature_array[:, stat_start+2] = features['amplitude_skew'].mean(axis=(0,1))
+    feature_array[:, stat_start+3] = features['amplitude_kurtosis'].mean(axis=(0,1))
+    feature_array[:, stat_start+4] = features['phase_std'].mean(axis=(0,1))
+    
+    # Save to .npy file
+    output_name = f"{filepath.stem}_features.npy"
+    output_path = output_dir / output_name
+    np.save(output_path, feature_array)
+    print(f"Saved feature array with shape: {feature_array.shape}")
+    return output_path
+
 def main():
     print("CSI Data Preprocessing")
     print("-" * 50)
@@ -125,9 +162,11 @@ def main():
         print("Please create a 'data' directory and place all .mat files inside it.")
         return
     
-    # Create output directory for plots
-    output_dir = Path('csi_features')
-    output_dir.mkdir(exist_ok=True)
+    # Create output directories
+    feature_dir = Path('csi_features')
+    plot_dir = Path('visualizations')
+    feature_dir.mkdir(exist_ok=True)
+    plot_dir.mkdir(exist_ok=True)
     
     # Process each .mat file
     mat_files = sorted([f for f in data_dir.iterdir() if f.suffix == '.mat'])
@@ -158,9 +197,14 @@ def main():
             for name, feature in normalized_features.items():
                 print(f"{name:15s}: min={feature.min():.3f}, max={feature.max():.3f}, mean={feature.mean():.3f}")
             
+            # Save features
+            print("\nSaving features...")
+            feature_path = save_features(normalized_features, filepath, feature_dir)
+            print(f"Saved features to: {feature_path}")
+            
             # Plot features
             print("\nGenerating visualization...")
-            plot_path = output_dir / f'csi_features_{filepath.name.replace(".mat", ".png")}'
+            plot_path = plot_dir / f'csi_features_{filepath.name.replace(".mat", ".png")}'
             plot_csi_features(normalized_features, filepath.name)
             print(f"Saved visualization to: {plot_path}")
             
