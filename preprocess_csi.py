@@ -3,6 +3,7 @@ import h5py
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 def load_csi_data(filepath, max_packets=10000):
     """
@@ -117,22 +118,30 @@ def main():
     print("CSI Data Preprocessing")
     print("-" * 50)
     
+    # Check if data directory exists
+    data_dir = Path('data')
+    if not data_dir.exists():
+        print(f"Error: '{data_dir}' directory not found!")
+        print("Please create a 'data' directory and place all .mat files inside it.")
+        return
+    
     # Create output directory for plots
-    os.makedirs('csi_features', exist_ok=True)
+    output_dir = Path('csi_features')
+    output_dir.mkdir(exist_ok=True)
     
     # Process each .mat file
-    mat_files = sorted([f for f in os.listdir('.') if f.endswith('.mat')])
+    mat_files = sorted([f for f in data_dir.iterdir() if f.suffix == '.mat'])
     total_files = len(mat_files)
     print(f"Found {total_files} .mat files to process\n")
     
-    for idx, filename in enumerate(mat_files, 1):
-        print(f"Processing file {idx}/{total_files}: {filename}")
+    for idx, filepath in enumerate(mat_files, 1):
+        print(f"Processing file {idx}/{total_files}: {filepath.name}")
         print("-" * 40)
         
         try:
             # Load and preprocess data with random sampling
             print("Loading data...")
-            csi_data = load_csi_data(filename, max_packets=10000)
+            csi_data = load_csi_data(str(filepath), max_packets=10000)
             print(f"Loaded CSI data shape: {csi_data.shape}")
             
             # Extract features
@@ -151,15 +160,15 @@ def main():
             
             # Plot features
             print("\nGenerating visualization...")
-            plot_path = os.path.join('csi_features', f'csi_features_{filename.replace(".mat", ".png")}')
-            plot_csi_features(normalized_features, filename)
+            plot_path = output_dir / f'csi_features_{filepath.name.replace(".mat", ".png")}'
+            plot_csi_features(normalized_features, filepath.name)
             print(f"Saved visualization to: {plot_path}")
             
-            print(f"\nSuccessfully processed {filename}")
+            print(f"\nSuccessfully processed {filepath.name}")
             print("=" * 50 + "\n")
             
         except Exception as e:
-            print(f"Error processing {filename}: {str(e)}\n")
+            print(f"Error processing {filepath.name}: {str(e)}\n")
             continue
 
 if __name__ == "__main__":
