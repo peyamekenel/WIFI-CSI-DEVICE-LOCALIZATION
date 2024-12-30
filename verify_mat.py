@@ -20,8 +20,10 @@ def main():
     print("CSI Data Verification Report")
     print("-" * 50)
     
-    # Get all .mat files
-    files = sorted([f for f in os.listdir('.') if f.endswith('.mat')])
+    # Get all .mat files from data directory
+    data_dir = 'data'
+    files = sorted([f for f in os.listdir(data_dir) if f.endswith('.mat')])
+    files = [os.path.join(data_dir, f) for f in files]
     print(f"Found {len(files)} .mat files\n")
     
     angles = set()
