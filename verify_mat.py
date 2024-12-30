@@ -1,6 +1,7 @@
 import os
 import h5py
 import numpy as np
+from pathlib import Path
 
 def quick_verify_mat(filepath):
     """Quickly verify .mat file structure without loading full arrays."""
@@ -13,17 +14,26 @@ def quick_verify_mat(filepath):
             # Get shape without loading data
             shape = f['csi_complex_data'].shape
             return True, shape
+    except h5py.HLError as e:
+        return False, f"HDF5 Error: {str(e)}"
+    except OSError as e:
+        return False, f"File access error: {str(e)}"
     except Exception as e:
-        return False, str(e)
+        return False, f"Unexpected error: {str(e)}"
 
 def main():
     print("CSI Data Verification Report")
     print("-" * 50)
     
+    # Check if data directory exists
+    data_dir = Path('data')
+    if not data_dir.exists():
+        print(f"Error: '{data_dir}' directory not found!")
+        print("Please create a 'data' directory and place all .mat files inside it.")
+        return
+    
     # Get all .mat files from data directory
-    data_dir = 'data'
-    files = sorted([f for f in os.listdir(data_dir) if f.endswith('.mat')])
-    files = [os.path.join(data_dir, f) for f in files]
+    files = sorted([f for f in data_dir.iterdir() if f.suffix == '.mat'])
     print(f"Found {len(files)} .mat files\n")
     
     angles = set()
