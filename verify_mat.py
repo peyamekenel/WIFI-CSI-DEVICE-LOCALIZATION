@@ -39,8 +39,9 @@ def main():
     angles = set()
     distances = set()
     
-    for filename in files:
+    for filepath in files:
         # Extract metadata from filename
+        filename = str(filepath.name)  # Convert Path to string for filename operations
         parts = filename.replace('.mat', '').split('_')
         angle_str = parts[1].replace('deg', '')
         # Handle negative angles (e.g., 'minus60' -> -60)
@@ -51,7 +52,7 @@ def main():
         distance = int(parts[2].replace('m', ''))
         
         # Verify file
-        success, result = quick_verify_mat(filename)
+        success, result = quick_verify_mat(str(filepath))
         
         if success:
             print(f"✓ {filename}")
