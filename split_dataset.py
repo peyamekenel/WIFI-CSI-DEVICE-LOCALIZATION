@@ -86,14 +86,14 @@ def normalize_feature_array(feature_array):
     
     return normalized
 
-def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
-    """Create feature vectors using non-overlapping windows over CSI data packets.
-    Features are designed to be completely independent between windows.
+def create_feature_vectors_timed(csi_data, window_size=500, step_size=250):
+    """Create feature vectors using overlapping windows over CSI data packets.
+    Features are extracted with 50% overlap between consecutive windows.
     
     Args:
         csi_data: numpy array of shape (3, 30, N_packets) containing CSI data
-        window_size: number of packets to use in each window
-        step_size: ignored (windows are non-overlapping)
+        window_size: number of packets to use in each window (default: 500)
+        step_size: number of packets to shift for next window (default: 250, 50% overlap)
     
     Returns:
         feature_array: numpy array of shape (n_windows, n_features)
@@ -101,28 +101,24 @@ def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
     print(f"Creating feature vectors with window_size={window_size}, step_size={step_size}")
     print(f"Input CSI data shape: {csi_data.shape}")
     n_antennas, n_subcarriers, n_packets = csi_data.shape
+    
+    # Calculate number of windows with overlap
     n_windows = (n_packets - window_size) // step_size + 1
+    print(f"Creating {n_windows} windows with {step_size} step size...")
     
     # Calculate number of features (90 amplitude + 90 phase + 5 stats = 185 features)
     n_features = (n_antennas * n_subcarriers * 2) + 5  # Match preprocess_csi.py format
     feature_array = np.zeros((n_windows, n_features))
     
-    # Create non-overlapping windows
-    n_windows = n_packets // window_size
-    print(f"Creating {n_windows} non-overlapping windows...")
+    # Create overlapping windows
+    # No artificial limit on number of windows to preserve temporal information
     
-    # Randomly select a subset of windows to prevent having too many samples
-    max_windows = min(n_windows, 5)  # Limit to 5 windows per condition
-    selected_indices = np.random.choice(n_windows, max_windows, replace=False)
-    selected_indices.sort()  # Sort for sequential access
-    
-    print(f"Selected {max_windows} windows for processing...")
-    for window_idx in selected_indices:
-        if window_idx % 2 == 0:  # Show progress every other window
-            print(f"Processing window {window_idx}/{max_windows}...")
+    for window_idx in range(n_windows):
+        if window_idx % 10 == 0:  # Show progress every 10th window
+            print(f"Processing window {window_idx}/{n_windows}...")
         
-        # Use non-overlapping windows
-        start_idx = window_idx * window_size
+        # Use overlapping windows with step_size
+        start_idx = window_idx * step_size
         end_idx = start_idx + window_size
         
         # Create a completely independent window with enhanced noise and augmentation
@@ -131,27 +127,32 @@ def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
         # Calculate signal power for proportional noise
         signal_power = np.mean(np.abs(window_data)**2)
         
-        # Add significant phase rotation (up to 15 degrees)
-        phase_noise = np.random.uniform(-15 * np.pi/180, 15 * np.pi/180, size=window_data.shape)
+        # Add more aggressive phase rotation (up to 30 degrees)
+        phase_noise = np.random.uniform(-30 * np.pi/180, 30 * np.pi/180, size=window_data.shape)
         window_data = window_data * np.exp(1j * phase_noise)
         
-        # Add complex Gaussian noise (15% of signal power)
-        noise_std = np.sqrt(0.15 * signal_power)
+        # Add stronger complex Gaussian noise (25% of signal power)
+        noise_std = np.sqrt(0.25 * signal_power)
         complex_noise = (np.random.normal(0, noise_std, window_data.shape) + 
                        1j * np.random.normal(0, noise_std, window_data.shape))
         window_data = window_data + complex_noise
         
-        # Add frequency-selective fading with more variation
-        freq_fade = np.random.uniform(0.7, 1.3, (1, window_data.shape[1], 1))
+        # Add more aggressive frequency-selective fading
+        freq_fade = np.random.uniform(0.5, 1.5, (1, window_data.shape[1], 1))
         window_data = window_data * freq_fade
         
-        # Add random time-varying phase drift
-        time_drift = np.linspace(0, np.random.uniform(-10, 10) * np.pi/180, window_data.shape[2])
+        # Add more pronounced time-varying effects
+        time_drift = np.linspace(0, np.random.uniform(-15, 15) * np.pi/180, window_data.shape[2])
         time_drift = np.exp(1j * time_drift)
         window_data = window_data * time_drift
         
-        # Add random subcarrier-specific attenuation
-        subcarrier_atten = np.random.uniform(0.8, 1.2, (1, window_data.shape[1], 1))
+        # Add mild time-varying phase drift
+        time_drift = np.linspace(0, np.random.uniform(-5, 5) * np.pi/180, window_data.shape[2])
+        time_drift = np.exp(1j * time_drift)
+        window_data = window_data * time_drift
+        
+        # Add mild subcarrier-specific attenuation
+        subcarrier_atten = np.random.uniform(0.9, 1.1, (1, window_data.shape[1], 1))
         window_data = window_data * subcarrier_atten
         
         # Extract amplitude (in dB) and phase with noise
@@ -160,8 +161,8 @@ def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
         amplitude_db = 20 * np.log10(np.maximum(amplitude, epsilon))
         phase = np.angle(window_data)
         
-        # Add more significant amplitude noise (2% of signal)
-        amplitude_noise = np.random.normal(0, 0.02 * np.mean(amplitude_db), amplitude_db.shape)
+        # Add mild amplitude noise (0.5% of signal)
+        amplitude_noise = np.random.normal(0, 0.005 * np.mean(amplitude_db), amplitude_db.shape)
         amplitude_db += amplitude_noise
         
         # Extract robust features with enhanced statistics
@@ -172,10 +173,28 @@ def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
                 amp_data = amplitude_db[i, j, :]
                 feature_array[window_idx, feature_idx] = np.median(amp_data)  # More robust than mean
                 
-                # Phase features (next 90) with unwrapping
-                phase_data = np.unwrap(phase[i, j, :])
+                # Phase features (next 90) with coherent unwrapping
+                # Get phase data for current antenna and adjacent subcarriers
+                if j == 0:
+                    phase_data = phase[i, j:j+2, :]
+                elif j == n_subcarriers - 1:
+                    phase_data = phase[i, j-1:j+1, :]
+                else:
+                    phase_data = phase[i, j-1:j+2, :]
+                
+                # Unwrap phase coherently across subcarriers
+                phase_unwrapped = np.unwrap(np.unwrap(phase_data, axis=1), axis=0)
+                
+                # Use the phase from the current subcarrier (middle one for j not at edges)
+                if j == 0:
+                    phase_current = phase_unwrapped[0, :]
+                elif j == n_subcarriers - 1:
+                    phase_current = phase_unwrapped[-1, :]
+                else:
+                    phase_current = phase_unwrapped[1, :]
+                
                 phase_idx = (n_antennas * n_subcarriers) + feature_idx
-                feature_array[window_idx, phase_idx] = stats.circmean(phase_data)
+                feature_array[window_idx, phase_idx] = stats.circmean(phase_current)
                 
                 feature_idx += 1
         
@@ -187,23 +206,31 @@ def create_feature_vectors_timed(csi_data, window_size=100, step_size=None):
         feature_array[window_idx, stat_start+1] = stats.median_abs_deviation(amplitude_db.flatten())  # MAD
         feature_array[window_idx, stat_start+2] = stats.skew(amplitude_db.flatten())  # Overall skewness
         feature_array[window_idx, stat_start+3] = stats.kurtosis(amplitude_db.flatten())  # Overall kurtosis
-        feature_array[window_idx, stat_start+4] = stats.iqr(np.unwrap(phase).flatten())  # Phase variation
+        # Unwrap phase coherently across all subcarriers for overall phase variation
+        phase_all = np.unwrap(np.unwrap(phase, axis=1), axis=0)
+        feature_array[window_idx, stat_start+4] = stats.iqr(phase_all.flatten())  # Phase variation
     
     return feature_array
 
-def load_and_process_data(data_dir='data', window_size=100, step_size=75):
+def load_and_process_data(data_dir='data', window_size=500, step_size=250):
     """Load and process all CSI data files using sliding windows.
     Features are normalized globally after all samples are collected.
-    Uses larger step size and adds significant noise for robustness.
+    Uses larger windows with 50% overlap to capture temporal patterns.
+    Removes duplicate samples to prevent data leakage.
     
     Args:
         data_dir: directory containing .mat files
-        window_size: number of packets to use in each window
-        step_size: number of packets to slide between windows (increased to reduce correlation)
+        window_size: number of packets to use in each window (default: 500)
+        step_size: number of packets to slide between windows (default: 250, 50% overlap)
     """
     X = []  # Features
     y = []  # Labels (distance, angle)
     file_indices = []  # Track which file each sample came from
+    
+    # Dictionary to track unique samples using feature hashing
+    unique_samples = {}
+    total_samples = 0
+    duplicate_count = 0
     
     # Process each .mat file in the data directory
     data_dir = Path(data_dir)
@@ -237,10 +264,22 @@ def load_and_process_data(data_dir='data', window_size=100, step_size=75):
             n_features = feature_array.shape[1]
             print(f"Created feature array with {n_samples} samples and {n_features} features")
             
-            # Add features, labels, and file indices
-            X.append(feature_array)
-            y.extend([(distance, angle)] * n_samples)
-            file_indices.extend([idx] * n_samples)  # Use file index to track samples
+            # Check for duplicates and add unique samples
+            print("\nChecking for duplicate samples...")
+            for i in range(n_samples):
+                sample = feature_array[i]
+                sample_hash = hash(sample.tobytes())
+                total_samples += 1
+                
+                if sample_hash not in unique_samples:
+                    unique_samples[sample_hash] = True
+                    X.append(sample.reshape(1, -1))  # Add as 2D array
+                    y.append((distance, angle))
+                    file_indices.append(idx)
+                else:
+                    duplicate_count += 1
+                    
+            print(f"Found {duplicate_count} duplicates out of {total_samples} samples so far")
             
         except Exception as e:
             print(f"Error processing {mat_file.name}: {str(e)}")
@@ -250,7 +289,10 @@ def load_and_process_data(data_dir='data', window_size=100, step_size=75):
         raise ValueError("No feature files were successfully processed")
     
     # Stack all features into a single array
-    X = np.vstack(X)
+    if not X:
+        raise ValueError("No unique samples were found after duplicate removal")
+        
+    X = np.vstack(X)  # Stack list of 2D arrays
     y = np.array(y)
     file_indices = np.array(file_indices)
     
@@ -258,9 +300,13 @@ def load_and_process_data(data_dir='data', window_size=100, step_size=75):
     print("\nNormalizing features globally...")
     X = normalize_feature_array(X)
     
-    print(f"\nTotal dataset size: {len(X)} samples")
+    print(f"\nFinal dataset statistics:")
+    print(f"Total samples processed: {total_samples}")
+    print(f"Duplicates removed: {duplicate_count}")
+    print(f"Unique samples retained: {len(X)}")
     print(f"Feature dimension: {X.shape[1]}")
     print(f"Number of unique files: {len(np.unique(file_indices))}")
+    print(f"Duplicate ratio: {duplicate_count/total_samples*100:.2f}%")
     
     return X, y, file_indices
 

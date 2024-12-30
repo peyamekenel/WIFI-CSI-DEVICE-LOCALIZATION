@@ -5,7 +5,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (accuracy_score, mean_squared_error, mean_absolute_error,
                            confusion_matrix, classification_report)
-from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.model_selection import cross_val_score, StratifiedKFold, LeaveOneOut
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
@@ -57,9 +57,9 @@ def train_classification_models(X_train, X_test, y_train, y_test):
     if overlap > 0:
         print(f"\nWARNING: Found {overlap} identical samples in both train and test sets!")
 
-    # Initialize nested cross-validation
-    outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    # Initialize nested cross-validation with 3 outer folds and LOOCV for inner validation
+    outer_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    inner_cv = LeaveOneOut()  # Use LOOCV for inner validation due to small sample size
     
     # Initialize arrays to store nested CV results
     n_samples = X_train.shape[0]
@@ -73,11 +73,15 @@ def train_classification_models(X_train, X_test, y_train, y_test):
         X_fold_train, X_fold_val = X_train[train_idx], X_train[val_idx]
         y_fold_train, y_fold_val = y_train[train_idx], y_train[val_idx]
         
-        # Feature selection within the fold
-        n_features = min(25, X_train.shape[1])
+        # Enhanced feature selection within the fold (k=80)
+        n_features = min(80, X_train.shape[1])
         selector = SelectKBest(score_func=f_classif, k=n_features)
         X_fold_train_selected = selector.fit_transform(X_fold_train, y_fold_train)
         X_fold_val_selected = selector.transform(X_fold_val)
+        
+        # Print selected feature indices for analysis
+        selected_features = np.where(selector.get_support())[0]
+        print(f"Selected {len(selected_features)} features: {selected_features}")
         
         # Add controlled noise for regularization (1% of std dev)
         noise_level = 0.01 * np.std(X_fold_train_selected)
@@ -86,18 +90,19 @@ def train_classification_models(X_train, X_test, y_train, y_test):
         print(f"\nOuter Fold {fold_idx}:")
         print(f"Selected {n_features} features")
     
-    # Initialize models with stronger regularization
+    # Initialize models with deeper trees and more estimators
     # Define model configurations
     models = {
         'Random Forest': lambda: RandomForestClassifier(
-            n_estimators=50,
-            max_depth=3,
-            min_samples_split=10,
-            min_samples_leaf=8,
+            n_estimators=200,  # Increased from 50 to 200
+            max_depth=None,    # Allow trees to grow to full depth
+            min_samples_split=5,  # Reduced from 10 to allow deeper splits
+            min_samples_leaf=4,   # Reduced from 8 to allow finer leaf nodes
             max_features='sqrt',
             bootstrap=True,
             class_weight='balanced',
-            random_state=42
+            random_state=42,
+            n_jobs=-1  # Use all available cores
         ),
         'SVM': lambda: SVC(
             kernel='rbf',
@@ -134,13 +139,17 @@ def train_classification_models(X_train, X_test, y_train, y_test):
             X_fold_train, X_fold_val = X_train[train_idx], X_train[val_idx]
             y_fold_train, y_fold_val = y_train[train_idx], y_train[val_idx]
             
-            # Feature selection within the fold
-            selector = SelectKBest(score_func=f_classif, k=min(25, X_train.shape[1]))
+            # Enhanced feature selection within the fold (k=80)
+            selector = SelectKBest(score_func=f_classif, k=min(80, X_train.shape[1]))
             X_fold_train_selected = selector.fit_transform(X_fold_train, y_fold_train)
             X_fold_val_selected = selector.transform(X_fold_val)
             
+            # Print selected feature indices for analysis
+            selected_features = np.where(selector.get_support())[0]
+            print(f"Selected {len(selected_features)} features: {selected_features}")
+            
             # Inner loop for hyperparameter tuning (if needed)
-            best_score = 0
+            best_score = -np.inf  # Changed from 0 to -inf to ensure we always get a model
             best_model = None
             
             for _ in range(3):  # Try 3 different random states
@@ -162,6 +171,11 @@ def train_classification_models(X_train, X_test, y_train, y_test):
                     best_score = avg_score
                     best_model = model
             
+            # Ensure we always have a model by using the factory if none performed well
+            if best_model is None:
+                print("Warning: Using default KNN model as fallback")
+                best_model = model_factory()
+            
             # Train best model on full fold training data
             best_model.fit(X_fold_train_selected, y_fold_train)
             fold_predictions = best_model.predict(X_fold_val_selected)
@@ -173,9 +187,14 @@ def train_classification_models(X_train, X_test, y_train, y_test):
             print(f"Fold {fold_idx} accuracy: {fold_score:.4f}")
         
         # Final evaluation on test set
-        selector_final = SelectKBest(score_func=f_classif, k=min(25, X_train.shape[1]))
+        # Final feature selection with k=80
+        selector_final = SelectKBest(score_func=f_classif, k=min(80, X_train.shape[1]))
         X_train_selected_final = selector_final.fit_transform(X_train, y_train)
         X_test_selected_final = selector_final.transform(X_test)
+        
+        # Print final selected feature indices
+        final_features = np.where(selector_final.get_support())[0]
+        print(f"\nFinal selected features: {final_features}")
         
         final_model = model_factory()
         final_model.fit(X_train_selected_final, y_train)
