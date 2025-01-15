@@ -56,7 +56,7 @@ def validate(model, val_loader, criterion, device):
     
     return running_loss / len(val_loader)
 
-def train_model(data_dir, num_epochs=10, batch_size=32):
+def train_model(data_dir, num_epochs=5, batch_size=32):
     """
     Train the model with early stopping and L2 regularization monitoring.
     
