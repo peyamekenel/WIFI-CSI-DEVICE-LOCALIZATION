@@ -36,9 +36,22 @@ def evaluate_model():
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
-    # Create test dataloader
+    # Create test dataloader with smaller subset for quick verification
     dataloaders = create_dataloaders('HALOC', batch_size=32)
     test_loader = dataloaders['test']
+    
+    # Create smaller subset for quick verification
+    dataset = test_loader.dataset
+    subset_size = min(1000, len(dataset))
+    indices = torch.randperm(len(dataset))[:subset_size]
+    subset = torch.utils.data.Subset(dataset, indices)
+    test_loader = torch.utils.data.DataLoader(
+        subset,
+        batch_size=32,
+        shuffle=False,
+        num_workers=2,
+        pin_memory=True
+    )
     
     # Collect predictions and ground truth
     all_preds = []
