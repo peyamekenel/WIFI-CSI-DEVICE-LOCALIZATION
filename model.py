@@ -158,7 +158,7 @@ def create_model(device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
     model = CSILocalizationNet().to(device)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-4)  # Reduced learning rate for raw values
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-8)  # Final adjustment to target 5-10% L2 impact
     
     return model, criterion, optimizer
 
