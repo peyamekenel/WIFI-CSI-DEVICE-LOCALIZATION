@@ -56,14 +56,15 @@ def validate(model, val_loader, criterion, device):
     
     return running_loss / len(val_loader)
 
-def train_model(data_dir, num_epochs=50, batch_size=16):
+def train_model(data_dir, num_epochs=3, batch_size=8):
     """
     Train the ResNet18 model with window-based CSI spectrograms.
+    Using reduced dataset size and batch size for initial testing.
     
     Args:
         data_dir: Path to dataset
-        num_epochs: Maximum number of epochs
-        batch_size: Batch size (reduced from 32 due to window size)
+        num_epochs: Maximum number of epochs (reduced for testing)
+        batch_size: Batch size (reduced for memory efficiency)
     """
     # Create save directory for checkpoints
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -77,10 +78,32 @@ def train_model(data_dir, num_epochs=50, batch_size=16):
     # Create model, criterion, and optimizer
     model, criterion, optimizer = create_resnet18_model(device)
     
-    # Create dataloaders
-    dataloaders = create_dataloaders(data_dir, batch_size=batch_size)
-    train_loader = dataloaders['train']
-    val_loader = dataloaders['val']
+    # Create dataloaders with subsets for quick testing
+    dataloaders = create_dataloaders(data_dir, batch_size=batch_size, num_workers=1)
+    
+    # Create training subset (1000 samples)
+    full_train_loader = dataloaders['train']
+    train_indices = [int(i) for i in torch.randperm(len(full_train_loader.dataset))[:1000]]
+    train_subset = torch.utils.data.Subset(full_train_loader.dataset, train_indices)
+    train_loader = torch.utils.data.DataLoader(
+        train_subset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=1,
+        pin_memory=True
+    )
+    
+    # Create validation subset (100 samples)
+    full_val_loader = dataloaders['val']
+    val_indices = [int(i) for i in torch.randperm(len(full_val_loader.dataset))[:100]]
+    val_subset = torch.utils.data.Subset(full_val_loader.dataset, val_indices)
+    val_loader = torch.utils.data.DataLoader(
+        val_subset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=1,
+        pin_memory=True
+    )
     
     # Training loop
     best_val_loss = float('inf')

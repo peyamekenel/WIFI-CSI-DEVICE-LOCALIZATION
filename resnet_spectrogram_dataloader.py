@@ -100,8 +100,12 @@ class ResnetSpectrogramDataset(Dataset):
                 spectrogram_tensor: shape (1, CSI_SUBCARRIERS, window_size)
                 position_tensor: shape (3,) for (x, y, z)
         """
+        # Convert tensor index to Python integer if needed
+        if isinstance(index, torch.Tensor):
+            index = index.item()
+            
         # Add window_half to avoid border issues
-        center_idx = index + self.window_half
+        center_idx = int(index + self.window_half)
         
         # Extract window of features
         feature_window = self.features[center_idx - self.window_half:center_idx + self.window_half]
@@ -119,7 +123,7 @@ class ResnetSpectrogramDataset(Dataset):
         
         return torch.tensor(feature_window, dtype=torch.float32), torch.tensor(position, dtype=torch.float32)
 
-def create_dataloaders(data_dir, batch_size=32, num_workers=4):
+def create_dataloaders(data_dir, batch_size=32, num_workers=1):
     """
     Create DataLoaders for all splits.
     
