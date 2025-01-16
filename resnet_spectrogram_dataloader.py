@@ -13,18 +13,20 @@ csi_valid_subcarrier_index += [i for i in range(33, 59)]
 CSI_SUBCARRIERS = len(csi_valid_subcarrier_index)
 
 class ResnetSpectrogramDataset(Dataset):
-    def __init__(self, data_dir, window_size=351, split='train'):
+    def __init__(self, data_dir, window_size=351, split='train', cache_size=1000):
         """
-        Initialize the dataset with window-based CSI amplitude spectrograms.
+        Initialize the dataset with lazy loading and LRU cache for CSI data.
         
         Args:
             data_dir: Path to HALOC dataset directory
             window_size: Number of packets in each window (default: 351 ~ 3.51s)
             split: One of 'train', 'val', or 'test'
+            cache_size: Number of processed samples to keep in memory
         """
         self.data_dir = Path(data_dir)
         self.window_size = window_size
         self.window_half = window_size // 2
+        self.cache_size = cache_size
         
         # Define split files
         splits = {
@@ -44,45 +46,53 @@ class ResnetSpectrogramDataset(Dataset):
             dfs.append(df)
         self.data = pd.concat(dfs, ignore_index=True)
         
+        # Initialize cache
+        self.feature_cache = {}
+        self.cache_order = []
+        
+        # Create cache directory
+        self.cache_dir = self.data_dir / 'cache'
+        self.cache_dir.mkdir(exist_ok=True)
+        
+        # Compute dataset size
+        self.effective_size = len(self.data) - self.window_size
+        
+        # Initialize min-max values
+        self.min_val = float('inf')
+        self.max_val = float('-inf')
+        
+    def _process_single_sample(self, idx):
+        """Process a single CSI sample."""
+        # Check cache first
+        if idx in self.feature_cache:
+            return self.feature_cache[idx]
+            
         # Process CSI data
-        self._process_csi_data()
+        csi_str = self.data.iloc[idx]['data']
+        csi_values = np.array([int(x) for x in csi_str.strip('[]').split(',')])
         
-    def _process_csi_data(self):
-        """Process CSI data and cache the results."""
-        # Create cache directory if it doesn't exist
-        cache_dir = self.data_dir / 'cache'
-        cache_dir.mkdir(exist_ok=True)
+        # Extract valid subcarriers
+        features = np.zeros(CSI_SUBCARRIERS, dtype=np.float32)
+        for i, subcarrier_idx in enumerate(csi_valid_subcarrier_index):
+            real_idx = subcarrier_idx * 2
+            imag_idx = real_idx - 1
+            complex_val = complex(csi_values[real_idx], csi_values[imag_idx])
+            features[i] = np.abs(complex_val)
         
-        # Generate cache filename based on data parameters
-        cache_file = cache_dir / f'csi_amplitude_{len(self.data)}_{CSI_SUBCARRIERS}.npy'
+        # Update min-max values
+        self.min_val = min(self.min_val, features.min())
+        self.max_val = max(self.max_val, features.max())
         
-        if cache_file.exists():
-            self.features = np.load(cache_file)
-        else:
-            # Extract CSI amplitudes
-            self.features = np.zeros([len(self.data), CSI_SUBCARRIERS], dtype=np.float32)
-            
-            print("Processing CSI data...")
-            for idx in tqdm(range(len(self.data))):
-                # Parse CSI string to complex numbers
-                csi_str = self.data.iloc[idx]['data']
-                csi_values = np.array([int(x) for x in csi_str.strip('[]').split(',')])
-                
-                # Extract valid subcarriers and convert to complex
-                for i, subcarrier_idx in enumerate(csi_valid_subcarrier_index):
-                    real_idx = subcarrier_idx * 2
-                    imag_idx = real_idx - 1
-                    complex_val = complex(csi_values[real_idx], csi_values[imag_idx])
-                    self.features[idx, i] = np.abs(complex_val)  # Store amplitude
-            
-            # Save to cache
-            np.save(cache_file, self.features)
+        # Add to cache
+        if len(self.cache_order) >= self.cache_size:
+            # Remove oldest entry
+            oldest = self.cache_order.pop(0)
+            del self.feature_cache[oldest]
         
-        # Apply min-max scaling
-        self.features = (self.features - np.min(self.features)) / (np.max(self.features) - np.min(self.features))
+        self.feature_cache[idx] = features
+        self.cache_order.append(idx)
         
-        # Compute effective dataset size (accounting for window borders)
-        self.effective_size = len(self.features) - self.window_size
+        return features
         
     def __len__(self):
         """Return the number of samples in the dataset."""
@@ -107,8 +117,15 @@ class ResnetSpectrogramDataset(Dataset):
         # Add window_half to avoid border issues
         center_idx = int(index + self.window_half)
         
-        # Extract window of features
-        feature_window = self.features[center_idx - self.window_half:center_idx + self.window_half]
+        # Process window of samples
+        feature_window = np.zeros((self.window_size, CSI_SUBCARRIERS), dtype=np.float32)
+        for i in range(self.window_size):
+            idx = center_idx - self.window_half + i
+            feature_window[i] = self._process_single_sample(idx)
+        
+        # Apply min-max scaling
+        if self.max_val > self.min_val:
+            feature_window = (feature_window - self.min_val) / (self.max_val - self.min_val)
         
         # Transpose to (CSI_SUBCARRIERS, window_size) and add channel dimension
         feature_window = np.transpose(feature_window)
