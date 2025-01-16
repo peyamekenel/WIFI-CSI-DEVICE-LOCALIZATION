@@ -1,29 +1,31 @@
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 from pathlib import Path
 import json
 from datetime import datetime
 import time
+from tqdm import tqdm
 
-from model import create_resnet18_model
-from resnet_spectrogram_dataloader import create_dataloaders
+from model import create_model  # Using standard model creation function
+from resnet_spectrogram_dataloader import ResnetSpectrogramDataset, CSI_SUBCARRIERS
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
-    """Train for one epoch."""
+    """Train for one epoch following reference implementation approach."""
     model.train()
     running_loss = 0.0
     
-    for batch_idx, (spectrograms, positions) in enumerate(train_loader):
-        # Move data to device
-        spectrograms = spectrograms.to(device)
-        positions = positions.to(device)
+    # Use tqdm for progress tracking (reference implementation style)
+    for batch in tqdm(train_loader, desc='Training', unit='batch', leave=False):
+        # Unpack batch and move to device
+        feature_window, positions = [x.to(device) for x in batch]
+        feature_window = feature_window.float()  # Ensure float type
         
         # Zero gradients
         optimizer.zero_grad()
         
         # Forward pass
-        outputs = model(spectrograms)
+        outputs = model(feature_window)
         loss = criterion(outputs, positions)
         
         # Backward pass and optimize
@@ -32,40 +34,37 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         
         # Update statistics
         running_loss += loss.item()
-        
-        # Print progress every 100 batches
-        if (batch_idx + 1) % 100 == 0:
-            print(f'Batch [{batch_idx + 1}/{len(train_loader)}], '
-                  f'Loss: {loss.item():.4f}')
     
     return running_loss / len(train_loader)
 
 def validate(model, val_loader, criterion, device):
-    """Validate the model."""
+    """Validate the model following reference implementation approach."""
     model.eval()
     running_loss = 0.0
     
     with torch.no_grad():
-        for spectrograms, positions in val_loader:
-            spectrograms = spectrograms.to(device)
-            positions = positions.to(device)
+        for batch in tqdm(val_loader, desc='Validating', unit='batch', leave=False):
+            # Unpack batch and move to device
+            feature_window, positions = [x.to(device) for x in batch]
+            feature_window = feature_window.float()  # Ensure float type
             
-            outputs = model(spectrograms)
+            # Forward pass
+            outputs = model(feature_window)
             loss = criterion(outputs, positions)
             running_loss += loss.item()
     
     return running_loss / len(val_loader)
 
-def train_model(data_dir, num_epochs=10, batch_size=16, window_size=351):
+def train_model(data_dir, num_epochs=50, batch_size=128, window_size=351, num_workers=8):
     """
-    Train the ResNet18 model with window-based CSI spectrograms.
-    Using reduced dataset size, batch size, and window size for initial testing.
+    Train the ResNet18 model with reference implementation configuration.
     
     Args:
         data_dir: Path to dataset
-        num_epochs: Maximum number of epochs (reduced for testing)
-        batch_size: Batch size (reduced for memory efficiency)
-        window_size: Number of packets in each window (reduced from 351)
+        num_epochs: Maximum number of epochs (default: 50)
+        batch_size: Number of samples per batch (default: 128)
+        window_size: Number of packets in each window (default: 351)
+        num_workers: Number of dataloader workers (default: 8)
     """
     print(f"\nInitializing training with:")
     print(f"- Batch size: {batch_size}")
@@ -80,46 +79,75 @@ def train_model(data_dir, num_epochs=10, batch_size=16, window_size=351):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
     
-    # Create model, criterion, and optimizer
-    model, criterion, optimizer = create_resnet18_model(device)
+    # Create model, criterion, and optimizer with reference configuration
+    model, criterion, optimizer = create_model(device)
     
     print("\nCreating dataloaders...")
-    # Create dataloaders with subsets for quick testing
-    dataloaders = create_dataloaders(data_dir, batch_size=batch_size, num_workers=1, window_size=window_size)
-    
-    print("\nCreating training subset...")
-    # Create training subset (1000 samples)
-    full_train_loader = dataloaders['train']
-    print(f"Full training dataset size: {len(full_train_loader.dataset)}")
-    train_indices = [int(i) for i in torch.randperm(len(full_train_loader.dataset))[:1000]]
-    train_subset = torch.utils.data.Subset(full_train_loader.dataset, train_indices)
-    train_loader = torch.utils.data.DataLoader(
-        train_subset,
+    # Training data loader (reference implementation approach)
+    print("\nCreating training dataloaders...")
+    train_datasets = []
+    for seq in ['0.csv', '1.csv', '2.csv', '3.csv']:
+        print(f"Loading training sequence: {seq}")
+        dataset = ResnetSpectrogramDataset(data_dir, window_size=window_size, split=seq)
+        train_datasets.append(dataset)
+    train_dataset = ConcatDataset(train_datasets)
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=1,
-        pin_memory=True
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True  # Reference implementation drops incomplete batches
     )
+    print(f"Training dataset size: {len(train_dataset)}")
     
-    # Create validation subset (100 samples)
-    full_val_loader = dataloaders['val']
-    val_indices = [int(i) for i in torch.randperm(len(full_val_loader.dataset))[:100]]
-    val_subset = torch.utils.data.Subset(full_val_loader.dataset, val_indices)
-    val_loader = torch.utils.data.DataLoader(
-        val_subset,
+    print("\nCreating validation dataloader...")
+    # Validation data loader (reference implementation approach)
+    val_dataset = ResnetSpectrogramDataset(data_dir, window_size=window_size, split='4.csv')
+    val_loader = DataLoader(
+        val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=1,
+        num_workers=num_workers,
         pin_memory=True
     )
+    print(f"Validation dataset size: {len(val_dataset)}")
     
-    # Training loop
+    print("\nCreating test dataloader...")
+    # Test data loader (reference implementation approach)
+    test_dataset = ResnetSpectrogramDataset(data_dir, window_size=window_size, split='5.csv')
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+    print(f"Test dataset size: {len(test_dataset)}")
+    
+    # Training loop with reference implementation configuration
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
+    patience_counter = 0  # For early stopping with reference implementation approach
     
-    print(f'\nStarting ResNet18 training for {num_epochs} epochs...')
-    print(f'Using window-based spectrograms ({window_size} packets)')
+    print(f'\nStarting ResNet18 training with reference configuration:')
+    print(f'- Epochs: {num_epochs}')
+    print(f'- Batch size: {batch_size}')
+    print(f'- Window size: {window_size}')
+    print(f'- Workers: {num_workers}')
+    print(f'- Training sequences: 0.csv, 1.csv, 2.csv, 3.csv')
+    print(f'- Validation sequence: 4.csv')
+    print(f'- Model size: {sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024):.2f}MB')
+    
+    # Verify performance targets
+    with torch.no_grad():
+        dummy_input = torch.randn(1, 1, CSI_SUBCARRIERS, window_size).to(device)
+        start_time = time.time()
+        for _ in range(100):
+            _ = model(dummy_input)
+        avg_inference_time = (time.time() - start_time) * 10  # ms per inference
+    print(f'- Inference time: {avg_inference_time:.2f}ms')
     for epoch in range(num_epochs):
         start_time = time.time()
         
@@ -131,7 +159,7 @@ def train_model(data_dir, num_epochs=10, batch_size=16, window_size=351):
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         
-        # Save best model
+        # Save best model (reference implementation approach)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save({
@@ -140,7 +168,10 @@ def train_model(data_dir, num_epochs=10, batch_size=16, window_size=351):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': train_loss,
                 'val_loss': val_loss,
+                'best_val_loss': best_val_loss,
+                'patience_counter': patience_counter
             }, save_dir / 'best_model.pth')
+            print(f'New best validation loss: {best_val_loss:.4f}')
         
         # Save training history
         history = {
@@ -158,10 +189,15 @@ def train_model(data_dir, num_epochs=10, batch_size=16, window_size=351):
               f'Val Loss: {val_loss:.4f} '
               f'Time: {time_elapsed:.2f}s')
         
-        # Early stopping (optional)
-        if val_loss > 1.5 * min(val_losses):
-            print('Early stopping due to validation loss increase')
-            break
+        # Early stopping with patience (reference implementation approach)
+        if val_loss > best_val_loss:
+            patience_counter += 1
+            if patience_counter >= 5:  # Stop after 5 epochs without improvement
+                print('Early stopping: validation loss not improving')
+                break
+        else:
+            patience_counter = 0
+            best_val_loss = val_loss
     
     print('\nTraining completed!')
     print(f'Best validation loss: {best_val_loss:.4f}')

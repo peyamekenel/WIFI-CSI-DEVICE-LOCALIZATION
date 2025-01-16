@@ -4,8 +4,11 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from pathlib import Path
 import json
-from model import create_resnet18
-from resnet_spectrogram_dataloader import create_dataloaders
+import time
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from model import create_model
+from resnet_spectrogram_dataloader import ResnetSpectrogramDataset, CSI_SUBCARRIERS
 
 def load_best_model(device):
     """Load the best ResNet18 model from checkpoints."""
@@ -16,8 +19,8 @@ def load_best_model(device):
     latest_dir = checkpoint_dirs[-1]
     print(f"\nLoading model from checkpoint: {latest_dir}")
     
-    # Load model
-    model = create_resnet18().to(device)
+    # Load model with reference implementation configuration
+    model, _, _ = create_model(device)  # We don't need criterion and optimizer for evaluation
     checkpoint = torch.load(latest_dir / 'best_model.pth')
     model.load_state_dict(checkpoint['model_state_dict'])
     return model, latest_dir
@@ -31,25 +34,43 @@ def evaluate_test_set():
     model, checkpoint_dir = load_best_model(device)
     model.eval()
     
-    # Create test dataloader with same window size as training
-    window_size = 351  # Must match training configuration
-    print(f"\nUsing window size: {window_size} (matching training configuration)")
-    dataloaders = create_dataloaders('HALOC', batch_size=32, window_size=window_size)
-    test_loader = dataloaders['test']
+    # Create test dataloader with reference implementation configuration
+    window_size = 351  # Reference implementation window size
+    batch_size = 128   # Reference implementation batch size
+    print(f"\nUsing reference implementation configuration:")
+    print(f"- Window size: {window_size}")
+    print(f"- Batch size: {batch_size}")
     
-    # Create smaller test subset for quick verification
-    test_subset_size = 1000  # Use 1000 samples for quick testing
-    dataset = test_loader.dataset
-    indices = torch.randperm(len(dataset))[:test_subset_size]
-    subset = torch.utils.data.Subset(dataset, indices)
-    test_loader = torch.utils.data.DataLoader(
-        subset,
-        batch_size=32,
+    # Create test dataset and dataloader
+    test_dataset = ResnetSpectrogramDataset('HALOC', window_size=window_size, split='5.csv')
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=1,
+        num_workers=8,  # Reference implementation workers
         pin_memory=True
     )
-    print(f"\nUsing {test_subset_size} samples for quick evaluation")
+    print(f"\nTest dataset size: {len(test_dataset)}")
+    
+    # Calculate model size
+    model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024)
+    print(f"\nModel size: {model_size:.2f}MB (target: <10MB)")
+    
+    # Test preprocessing time
+    start_time = time.time()
+    for _ in range(100):
+        _ = test_dataset._process_single_sample(0)
+    preproc_time = (time.time() - start_time) * 10  # ms per sample
+    print(f"Preprocessing time: {preproc_time:.2f}ms per sample (target: <1ms)")
+    
+    # Test inference time
+    dummy_input = torch.randn(1, 1, CSI_SUBCARRIERS, window_size).to(device)
+    start_time = time.time()
+    with torch.no_grad():
+        for _ in range(100):
+            _ = model(dummy_input)
+    inference_time = (time.time() - start_time) * 10  # ms per sample
+    print(f"Inference time: {inference_time:.2f}ms per sample (target: <20ms)")
     
     # Lists to store predictions and ground truth
     all_preds = []
@@ -102,29 +123,49 @@ def evaluate_test_set():
     print(f"Z: {rmse[2]:.4f} meters")
     print(f"\nOverall RMSE: {overall_rmse:.4f} meters")
     
-    # Compare with baseline from results_summary.md
-    baseline_rmse = {
-        'x': 3.9632,
-        'y': 0.3838,
-        'z': 0.0153,
-        'overall': 5.2783
-    }
-    
-    print("\nComparison with baseline:")
-    print("Dimension  Current    Baseline   Improvement")
+    # Compare with reference implementation
+    reference_rmse = 0.197  # meters (from paper)
+    print("\nComparison with reference implementation:")
+    print("Dimension  Current    Reference  Gap")
     print("-" * 45)
-    for dim, baseline in zip(['x', 'y', 'z'], rmse):
-        improvement = ((baseline_rmse[dim] - baseline) / baseline_rmse[dim]) * 100
-        print(f"{dim.upper()}-axis:  {baseline:.4f}m    {baseline_rmse[dim]:.4f}m    {improvement:+.1f}%")
+    for dim, current in zip(['x', 'y', 'z'], rmse):
+        gap = current - reference_rmse
+        print(f"{dim.upper()}-axis:  {current:.4f}m    {reference_rmse:.4f}m    {gap:+.4f}m")
     
-    overall_improvement = ((baseline_rmse['overall'] - overall_rmse) / baseline_rmse['overall']) * 100
-    print(f"Overall:   {overall_rmse:.4f}m    {baseline_rmse['overall']:.4f}m    {overall_improvement:+.1f}%")
+    overall_gap = overall_rmse - reference_rmse
+    print(f"Overall:   {overall_rmse:.4f}m    {reference_rmse:.4f}m    {overall_gap:+.4f}m")
     
-    # Compare with reference study
-    reference_rmse = 0.197  # meters
-    print(f"\nComparison with reference study:")
-    print(f"Our ResNet18: {overall_rmse:.3f}m")
-    print(f"Reference:    {reference_rmse:.3f}m")
+    # Verify technical requirements
+    print("\nTechnical Requirements:")
+    print(f"✓ Model size: {'PASS' if model_size < 10 else 'FAIL'} ({model_size:.2f}MB < 10MB)")
+    print(f"✓ Preprocessing: {'PASS' if preproc_time < 1 else 'FAIL'} ({preproc_time:.2f}ms < 1ms)")
+    print(f"✓ Inference: {'PASS' if inference_time < 20 else 'FAIL'} ({inference_time:.2f}ms < 20ms)")
+    print(f"✗ Accuracy: FAIL (gap: +{overall_gap:.4f}m)")
+    
+    # Save detailed results
+    results = {
+        'rmse': {
+            'current': {
+                'x': float(rmse[0]),
+                'y': float(rmse[1]),
+                'z': float(rmse[2]),
+                'overall': float(overall_rmse)
+            },
+            'reference': float(reference_rmse),
+            'gap': float(overall_gap)
+        },
+        'technical': {
+            'model_size_mb': float(model_size),
+            'preproc_time_ms': float(preproc_time),
+            'inference_time_ms': float(inference_time),
+            'requirements_met': {
+                'size': model_size < 10,
+                'preproc': preproc_time < 1,
+                'inference': inference_time < 20,
+                'accuracy': overall_rmse <= reference_rmse
+            }
+        }
+    }
     
     # Create 3D scatter plot
     fig = plt.figure(figsize=(12, 8))
@@ -175,16 +216,36 @@ def evaluate_test_set():
     
     # Save detailed results (convert numpy types to Python native types)
     results = {
-        'mean_test_loss': float(np.mean(test_losses)),
-        'mean_absolute_error': [float(x) for x in mean_error],
-        'rmse': [float(x) for x in rmse],
-        'overall_rmse': float(overall_rmse),
-        'num_test_samples': int(len(ground_truth)),
-        'improvements': {
-            'x': float(improvement),
-            'y': float(improvement),
-            'z': float(improvement),
-            'overall': float(overall_improvement)
+        'test_metrics': {
+            'mean_loss': float(np.mean(test_losses)),
+            'mean_absolute_error': [float(x) for x in mean_error],
+            'rmse': {
+                'x': float(rmse[0]),
+                'y': float(rmse[1]),
+                'z': float(rmse[2]),
+                'overall': float(overall_rmse)
+            }
+        },
+        'reference_comparison': {
+            'reference_rmse': float(reference_rmse),
+            'gap': float(overall_gap)
+        },
+        'technical_requirements': {
+            'model_size_mb': float(model_size),
+            'preproc_time_ms': float(preproc_time),
+            'inference_time_ms': float(inference_time),
+            'requirements_met': {
+                'size': model_size < 10,
+                'preproc': preproc_time < 1,
+                'inference': inference_time < 20,
+                'accuracy': overall_rmse <= reference_rmse
+            }
+        },
+        'dataset_info': {
+            'num_test_samples': int(len(ground_truth)),
+            'window_size': int(window_size),
+            'batch_size': int(batch_size),
+            'num_workers': 8
         }
     }
     
