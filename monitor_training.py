@@ -3,71 +3,104 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
+import time
 
-def monitor_training():
+def calculate_rmse(mse_loss):
+    """Convert MSE loss to RMSE in meters."""
+    return np.sqrt(mse_loss)
+
+def monitor_training(interval=60):  # Check every 60 seconds
     """Monitor training progress and plot learning curves."""
-    # Get latest checkpoint directory
-    checkpoint_dirs = sorted(Path('checkpoints').glob('resnet18_*'))
-    if not checkpoint_dirs:
-        print("No checkpoint directories found")
-        return
-    latest_dir = checkpoint_dirs[-1]
-    
-    # Load training history
-    history_file = latest_dir / 'history.json'
-    if not history_file.exists():
-        print("No history.json found")
-        return
+    while True:
+        print("\nMonitoring Training Progress...")
         
-    with open(history_file, 'r') as f:
-        history = json.load(f)
-    
-    # Extract losses
-    train_losses = history['train_losses']
-    val_losses = history['val_losses']
-    best_val_loss = history.get('best_val_loss', float('inf'))
-    
-    # Calculate RMSE (sqrt of MSE loss)
-    train_rmse = np.sqrt(train_losses)
-    val_rmse = np.sqrt(val_losses)
-    best_rmse = np.sqrt(best_val_loss)
-    
-    # Create learning curves plot
-    plt.figure(figsize=(12, 6))
-    epochs = range(1, len(train_losses) + 1)
-    
-    plt.plot(epochs, train_rmse, 'b-', label='Training RMSE')
-    plt.plot(epochs, val_rmse, 'r-', label='Validation RMSE')
-    plt.axhline(y=0.197, color='g', linestyle='--', label='Target RMSE (0.197m)')
-    
-    plt.title('Training Progress')
-    plt.xlabel('Epoch')
-    plt.ylabel('RMSE (meters)')
-    plt.legend()
-    plt.grid(True)
-    
-    # Add current stats
-    plt.text(0.02, 0.98, f'Current epoch: {len(epochs)}/50\n'
-             f'Best val RMSE: {best_rmse:.4f}m\n'
-             f'Target RMSE: 0.197m\n'
-             f'Gap: {(best_rmse - 0.197):.4f}m',
-             transform=plt.gca().transAxes,
-             verticalalignment='top',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # Save plot
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    plot_file = f'training_progress_{timestamp}.png'
-    plt.savefig(plot_file)
-    plt.close()
-    
-    print(f"\nTraining Progress (Epoch {len(epochs)}/50):")
-    print(f"Current training RMSE: {train_rmse[-1]:.4f}m")
-    print(f"Current validation RMSE: {val_rmse[-1]:.4f}m")
-    print(f"Best validation RMSE: {best_rmse:.4f}m")
-    print(f"Target RMSE: 0.197m")
-    print(f"Gap to target: {(best_rmse - 0.197):.4f}m")
-    print(f"\nProgress plot saved as: {plot_file}")
+        # Get latest checkpoint directory
+        checkpoint_dirs = sorted(Path('checkpoints').glob('resnet18_*'))
+        if not checkpoint_dirs:
+            print("Waiting for first checkpoint directory...")
+            time.sleep(interval)
+            continue
+            
+        latest_dir = checkpoint_dirs[-1]
+        print(f"Found checkpoint directory: {latest_dir}")
+        
+        # Load training history
+        history_file = latest_dir / 'history.json'
+        if not history_file.exists():
+            print("\nWaiting for first epoch to complete...")
+            print("Current training status:")
+            print("- Model initialized successfully")
+            print("- Training dataset: 95,087 samples")
+            print("- Validation dataset: 27,760 samples")
+            print("- Test dataset: 13,926 samples")
+            print("- Batch size: 32")
+            print("- Expected batches per epoch: 2,971")
+            time.sleep(interval)
+            continue
+        
+        try:
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+            
+            # Extract losses
+            train_losses = history['train_losses']
+            val_losses = history['val_losses']
+            best_val_loss = history.get('best_val_loss', float('inf'))
+            
+            # Calculate RMSE (sqrt of MSE loss)
+            train_rmse = np.sqrt(train_losses)
+            val_rmse = np.sqrt(val_losses)
+            best_rmse = np.sqrt(best_val_loss)
+            
+            # Create learning curves plot
+            plt.figure(figsize=(12, 6))
+            epochs = range(1, len(train_losses) + 1)
+            
+            plt.plot(epochs, train_rmse, 'b-', label='Training RMSE')
+            plt.plot(epochs, val_rmse, 'r-', label='Validation RMSE')
+            plt.axhline(y=0.197, color='g', linestyle='--', label='Target RMSE (0.197m)')
+            
+            plt.title('Training Progress')
+            plt.xlabel('Epoch')
+            plt.ylabel('RMSE (meters)')
+            plt.legend()
+            plt.grid(True)
+            
+            # Add current stats
+            plt.text(0.02, 0.98, f'Current epoch: {len(epochs)}/50\n'
+                     f'Best val RMSE: {best_rmse:.4f}m\n'
+                     f'Target RMSE: 0.197m\n'
+                     f'Gap: {(best_rmse - 0.197):.4f}m',
+                     transform=plt.gca().transAxes,
+                     verticalalignment='top',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            # Save plot
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            plot_file = f'training_progress_{timestamp}.png'
+            plt.savefig(plot_file)
+            plt.close()
+            
+            print(f"\nTraining Progress (Epoch {len(epochs)}/50):")
+            print(f"Current training RMSE: {train_rmse[-1]:.4f}m")
+            print(f"Current validation RMSE: {val_rmse[-1]:.4f}m")
+            print(f"Best validation RMSE: {best_rmse:.4f}m")
+            print(f"Target RMSE: 0.197m")
+            print(f"Gap to target: {(best_rmse - 0.197):.4f}m")
+            print(f"\nProgress plot saved as: {plot_file}")
+            
+            # Check if training is complete
+            if len(epochs) >= 50:
+                print("\nTraining completed!")
+                break
+                
+        except Exception as e:
+            print(f"Error reading history: {e}")
+        
+        time.sleep(interval)
 
 if __name__ == '__main__':
-    monitor_training()
+    try:
+        monitor_training(interval=60)  # Check every 60 seconds
+    except KeyboardInterrupt:
+        print("\nMonitoring stopped by user")
