@@ -206,5 +206,19 @@ def train_model(data_dir, num_epochs=50, batch_size=128, window_size=351, num_wo
     return model, history
 
 if __name__ == '__main__':
-    data_dir = 'HALOC'
-    model, history = train_model(data_dir)
+    import argparse
+    parser = argparse.ArgumentParser(description='Train ResNet18 model for HALOC localization')
+    parser.add_argument('--data_dir', type=str, default='HALOC', help='Path to HALOC dataset')
+    parser.add_argument('--num_epochs', type=int, default=50, help='Number of training epochs')
+    parser.add_argument('--batch_size', type=int, default=128, help='Training batch size')
+    parser.add_argument('--window_size', type=int, default=351, help='CSI feature window size')
+    parser.add_argument('--workers', type=int, default=2, help='Number of dataloader workers')
+    args = parser.parse_args()
+    
+    model, history = train_model(
+        data_dir=args.data_dir,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        window_size=args.window_size,
+        num_workers=args.workers
+    )
