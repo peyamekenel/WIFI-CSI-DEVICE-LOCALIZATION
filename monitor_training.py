@@ -53,27 +53,53 @@ def monitor_training(interval=60):  # Check every 60 seconds
             best_rmse = np.sqrt(best_val_loss)
             
             # Create learning curves plot
-            plt.figure(figsize=(12, 6))
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
             epochs = range(1, len(train_losses) + 1)
             
-            plt.plot(epochs, train_rmse, 'b-', label='Training RMSE')
-            plt.plot(epochs, val_rmse, 'r-', label='Validation RMSE')
-            plt.axhline(y=0.197, color='g', linestyle='--', label='Target RMSE (0.197m)')
+            # RMSE plot
+            ax1.plot(epochs, train_rmse, 'b-', label='Training RMSE')
+            ax1.plot(epochs, val_rmse, 'r-', label='Validation RMSE')
+            ax1.axhline(y=0.197, color='g', linestyle='--', label='Target RMSE (0.197m)')
+            ax1.set_title('RMSE Progress')
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('RMSE (meters)')
+            ax1.legend()
+            ax1.grid(True)
             
-            plt.title('Training Progress')
-            plt.xlabel('Epoch')
-            plt.ylabel('RMSE (meters)')
-            plt.legend()
-            plt.grid(True)
+            # Convergence analysis
+            window = 5  # Rolling window for convergence check
+            if len(val_rmse) >= window:
+                rolling_mean = np.convolve(val_rmse, np.ones(window)/window, mode='valid')
+                rolling_std = np.array([np.std(val_rmse[i:i+window]) for i in range(len(val_rmse)-window+1)])
+                convergence_epochs = range(window, len(val_rmse) + 1)
+                
+                ax2.plot(convergence_epochs, rolling_mean, 'g-', label='Rolling Mean RMSE')
+                ax2.fill_between(convergence_epochs, 
+                               rolling_mean - rolling_std,
+                               rolling_mean + rolling_std,
+                               alpha=0.2, color='g')
+                ax2.set_title('Convergence Analysis')
+                ax2.set_xlabel('Epoch')
+                ax2.set_ylabel('RMSE (meters)')
+                ax2.legend()
+                ax2.grid(True)
             
-            # Add current stats
-            plt.text(0.02, 0.98, f'Current epoch: {len(epochs)}/50\n'
-                     f'Best val RMSE: {best_rmse:.4f}m\n'
-                     f'Target RMSE: 0.197m\n'
-                     f'Gap: {(best_rmse - 0.197):.4f}m',
-                     transform=plt.gca().transAxes,
-                     verticalalignment='top',
-                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            # Add detailed stats
+            stats_text = (
+                f'Training Progress:\n'
+                f'Current epoch: {len(epochs)}/50\n'
+                f'Best val RMSE: {best_rmse:.4f}m\n'
+                f'Target RMSE: 0.197m\n'
+                f'Gap: {(best_rmse - 0.197):.4f}m\n\n'
+                f'Convergence Metrics:\n'
+                f'Recent std: {np.std(val_rmse[-5:]):.4f}m\n'
+                f'Improvement rate: {((val_rmse[0] - val_rmse[-1])/val_rmse[0]*100):.1f}%\n'
+                f'Epochs since best: {len(epochs) - np.argmin(val_rmse)}'
+            )
+            fig.text(0.02, 0.02, stats_text,
+                    transform=fig.transFigure,
+                    verticalalignment='bottom',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
             
             # Save plot
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
