@@ -3,6 +3,8 @@ import torch.nn as nn
 import torchvision.models as models
 import time
 
+__all__ = ['create_resnet18', 'create_model']
+
 def create_model(device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
     Create ResNet18 model with optimizer and loss function.

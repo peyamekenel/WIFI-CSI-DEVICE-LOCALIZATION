@@ -2,9 +2,14 @@ import torch
 import numpy as np
 import time
 from pathlib import Path
-from model import CSILocalizationNet
+from model import create_model
 from dataloader import create_dataloaders
 from prepare_dataset import HALOCDataset
+from tqdm import tqdm
+
+# Set environment variable for CPU training
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 def test_inference_time(model, test_loader, num_runs=100):
     """Test inference time with both single samples and batches."""
@@ -75,10 +80,14 @@ def test_preprocessing_time(dataset, num_runs=100):
     }
 
 def main():
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
     # Create model and dataset
-    model = CSILocalizationNet()
+    model, criterion, optimizer = create_model(device)  # Use create_model for consistency
     dataset = HALOCDataset('HALOC')
-    dataloaders = create_dataloaders('HALOC', batch_size=32)
+    dataloaders = create_dataloaders('HALOC', batch_size=128)  # Match training batch size
     
     # Test preprocessing time
     print("\nTesting preprocessing performance...")
