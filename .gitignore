@@ -1,0 +1,6 @@
+*.pth
+*.npy
+*.zip
+HALOC/*.csv
+__pycache__/
+*.pyc
